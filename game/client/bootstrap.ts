@@ -35,12 +35,14 @@ type requestScreenshotResponse = {
 
 const requestScreenshotQueue = {};
 
-RegisterNuiCallback('requestScreenshot', (data: requestScreenshotResponse): void => {
+RegisterNuiCallback('requestScreenshot', (data: requestScreenshotResponse, cback: (resp: string) => void): void => {
   const listener = requestScreenshotQueue[data.uid];
   if (listener) {
     listener(data.image);
     delete requestScreenshotQueue[data.uid];
   }
+
+  cback('ok');
 });
 
 global.exports('requestScreenshot', async (request: requestScreenshot, cback: () => void): void => {
