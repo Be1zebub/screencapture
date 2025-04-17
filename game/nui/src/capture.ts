@@ -14,16 +14,25 @@ type CaptureRequest = {
   dataType: 'blob' | 'base64';
 };
 
+type ScreenshotRequest = {
+  action: 'requestScreenshot';
+  encoding: Encoding;
+  quality: number;
+  uid: string;
+};
+
 export class Capture {
   #gameView: any;
   #canvas: HTMLCanvasElement | null = null;
 
   start() {
     window.addEventListener('message', async (event) => {
-      const data = event.data as CaptureRequest;
+      const data = event.data as CaptureRequest | ScreenshotRequest;
 
       if (data.action === 'capture') {
-        await this.captureScreen(data);
+        await this.captureScreen(data as CaptureRequest);
+      } else if (data.action === 'requestScreenshot') {
+        await this.requestScreenshot(data as ScreenshotRequest);
       }
     });
 
@@ -34,27 +43,92 @@ export class Capture {
     });
   }
 
-  async captureScreen(request: CaptureRequest) {
-    this.#canvas = document.createElement('canvas');
-    this.#canvas.width = window.innerWidth;
-    this.#canvas.height = window.innerHeight;
+  async createScreenshot() {
+    try {
+      this.#canvas = document.createElement('canvas');
+      this.#canvas.width = window.innerWidth;
+      this.#canvas.height = window.innerHeight;
 
-    this.#gameView = createGameView(this.#canvas);
+      this.#gameView = createGameView(this.#canvas);
 
-    const enc = request.encoding ?? 'png';
-    const qlty = request.quality ?? 0.5;
-    let imageData: string | Blob;
-    if (request.serverEndpoint || !request.formField) {
-      // make sure we don't care about serverEndpoint, only the dataType
-      imageData = await this.createBlob(this.#canvas, enc, qlty);
-    } else {
-      imageData = await this.createBlob(this.#canvas, enc, qlty);
+      return this.#canvas;
+    } catch (err) {
+      console.error('Error creating screenshot:', err);
+      return null;
+    }
+  }
+
+  async requestScreenshot(request: ScreenshotRequest) {
+    const canvas = await this.createScreenshot();
+
+    if (!canvas) {
+      console.error('Failed to create canvas for screenshot');
+      return;
     }
 
-    if (!imageData) return console.error('No image available');
+    try {
+      const enc = request.encoding ?? 'png';
+      const quality = request.quality ?? 0.7;
 
-    await this.httpUploadImage(request, imageData);
-    this.#canvas.remove();
+      // Get base64 image data
+      const dataUrl = await this.createDataURL(canvas, enc, quality);
+
+      // Send back to Lua client
+      const resourceName = window.GetParentResourceName ? window.GetParentResourceName() : 'screencapture';
+
+      fetch(`https://${resourceName}/requestScreenshot`, {
+        method: 'post',
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+        },
+        body: JSON.stringify({
+          uid: request.uid,
+          image: dataUrl,
+        }),
+      });
+    } catch (err) {
+      console.error('Error processing screenshot:', err);
+    } finally {
+      if (this.#canvas) {
+        this.#canvas.remove();
+        this.#canvas = null;
+      }
+    }
+  }
+
+  async captureScreen(request: CaptureRequest) {
+    const canvas = await this.createScreenshot();
+
+    if (!canvas) {
+      console.error('Failed to create canvas for screenshot');
+      return;
+    }
+
+    try {
+      const enc = request.encoding ?? 'png';
+      const quality = request.quality ?? 0.5;
+
+      let imageData: string | Blob;
+      if (request.serverEndpoint || !request.formField) {
+        imageData = await this.createBlob(canvas, enc, quality);
+      } else {
+        imageData = await this.createBlob(canvas, enc, quality);
+      }
+
+      if (!imageData) {
+        console.error('No image available');
+        return;
+      }
+
+      await this.httpUploadImage(request, imageData);
+    } catch (err) {
+      console.error('Error processing screenshot:', err);
+    } finally {
+      if (this.#canvas) {
+        this.#canvas.remove();
+        this.#canvas = null;
+      }
+    }
   }
 
   async httpUploadImage(request: CaptureRequest, imageData: string | Blob) {
@@ -87,9 +161,9 @@ export class Capture {
     return JSON.stringify({ imageData: imageData, dataType: request.dataType });
   }
 
-  createDataURL(canvas: HTMLCanvasElement): Promise<string> {
+  createDataURL(canvas: HTMLCanvasElement, enc: Encoding = 'png', quality = 0.7): Promise<string> {
     return new Promise((resolve, reject) => {
-      const url = canvas.toDataURL('image/webp', 0.7);
+      const url = canvas.toDataURL(`image/${enc}`, quality);
       if (!url) {
         reject('No data URL available');
       }

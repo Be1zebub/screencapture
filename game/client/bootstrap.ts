@@ -22,6 +22,39 @@ onNet('screencapture:INTERNAL_uploadComplete', (response: unknown, correlationId
   }
 });
 
+type Encoding = 'webp' | 'jpg' | 'png';
+
+type requestScreenshot = {
+  encoding: Encoding;
+  quality: number;
+};
+type requestScreenshotResponse = {
+  uid: string;
+  image: string;
+};
+
+const requestScreenshotQueue = {};
+
+RegisterNuiCallback('requestScreenshot', (data: requestScreenshotResponse): void => {
+  const listener = requestScreenshotQueue[data.uid];
+  if (listener) {
+    listener(data.image);
+    delete requestScreenshotQueue[data.uid];
+  }
+});
+
+global.exports('requestScreenshot', async (request: requestScreenshot, cback: () => void): void => {
+  const uid = uuidv4();
+  requestScreenshotQueue[uid] = cback;
+
+  SendNUIMessage({
+    encoding: encoding,
+    quality: quality,
+    uid: uid,
+    action: 'requestScreenshot',
+  });
+});
+
 global.exports(
   'requestScreenshotUpload',
   async (
