@@ -48,8 +48,8 @@ global.exports('requestScreenshot', async (request: requestScreenshot, cback: ()
   requestScreenshotQueue[uid] = cback;
 
   SendNUIMessage({
-    encoding: encoding,
-    quality: quality,
+    encoding: request.encoding,
+    quality: request.quality,
     uid: uid,
     action: 'requestScreenshot',
   });
